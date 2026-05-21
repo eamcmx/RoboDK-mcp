@@ -10,7 +10,11 @@ objects, check collisions, and execute vision-guided pick & place.
 <!-- VIDEO: drag-drop ClaudeRoboDK.mp4 here in the GitHub web editor.
      GitHub will replace this comment with a hosted <video> tag automatically. -->
 
-https://github.com/eamcmx/RoboDK-mcp/assets/PLACEHOLDER/ClaudeRoboDK.mp4
+
+
+https://github.com/user-attachments/assets/8995e3a9-16ba-4fcb-9efc-c9d3e7ef18b0
+
+
 
 > Claude driving a UR5 through the demo station — touch sequences, contour
 > traces, and a finale flourish — entirely from chat.
