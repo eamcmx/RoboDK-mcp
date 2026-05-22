@@ -44,6 +44,9 @@ Bugs fixed
     projecting (v2 returned multi-metre offsets for the image center).
 
 v3.0.1: ItemList(-1, 1) returned empty -- use filter=None for "all types".
+v3.0.2: Python ITEM_TYPE_* constants don't match the server's type codes in
+        some versions -- use server codes (1=Robot, 2=Frame, 3=Tool,
+        4=Object, 5=Target, 6=Program, 19=Camera) directly.
 
 Usage
 -----
@@ -94,45 +97,65 @@ def get_rdk():
 
 
 # ---------------------------------------------------------------------------
-# Item resolution -- fixes the "Claude vs UR5" name confusion in v2
+# Server type codes (observed live)
+# ---------------------------------------------------------------------------
+# The RoboDK server returns these integer type codes from `Item.Type()` and
+# accepts them as the `filter` argument to `Robolink.ItemList()`. The codes
+# DO NOT match the `ITEM_TYPE_*` constants in some `robodk` Python package
+# versions (which are shifted by one because `ITEM_TYPE_STATION = 1` was
+# inserted at the front). Using the server's codes directly avoids the
+# mismatch. v3.0.2 -- previously v3 imported the Python constants and every
+# robot/frame/tool/program lookup failed with "Item not found (type=N)".
+
+TYPE_ROBOT   = 1
+TYPE_FRAME   = 2
+TYPE_TOOL    = 3
+TYPE_OBJECT  = 4
+TYPE_TARGET  = 5
+TYPE_PROGRAM = 6
+TYPE_CAMERA  = 19
+
+
+# ---------------------------------------------------------------------------
+# Item resolution
 # ---------------------------------------------------------------------------
 
 def _item(name: str, item_type: Optional[int] = None):
-    """Resolve an item by name, with a typed fallback search."""
+    """Resolve an item by name.
+
+    `item_type` is a hint and is ignored if the untyped lookup already finds
+    a unique item -- this avoids the Python-constant-vs-server-code mismatch
+    documented above.
+    """
     rdk = get_rdk()
-    it = rdk.Item(name, item_type) if item_type is not None else rdk.Item(name)
+    it = rdk.Item(name)
     if it.Valid():
         return it
-    if item_type is not None:
-        for n in rdk.ItemList(item_type, True):
-            if str(n).lower() == name.lower():
-                return rdk.Item(n, item_type)
-    raise ValueError(f"Item '{name}' not found (type={item_type}).")
+    # Fallback: case-insensitive search through everything.
+    for n in rdk.ItemList(None, True):
+        if str(n).lower() == name.lower():
+            return rdk.Item(n)
+    raise ValueError(f"Item '{name}' not found.")
 
 
 def _robot(name: str):
-    from robodk.robolink import ITEM_TYPE_ROBOT
-    return _item(name, ITEM_TYPE_ROBOT)
+    return _item(name, TYPE_ROBOT)
 
 
 def _frame(name: str):
-    from robodk.robolink import ITEM_TYPE_FRAME
-    return _item(name, ITEM_TYPE_FRAME)
+    return _item(name, TYPE_FRAME)
 
 
 def _tool_item(name: str):
-    from robodk.robolink import ITEM_TYPE_TOOL
-    return _item(name, ITEM_TYPE_TOOL)
+    return _item(name, TYPE_TOOL)
 
 
 def _target(name: str):
-    from robodk.robolink import ITEM_TYPE_TARGET
-    return _item(name, ITEM_TYPE_TARGET)
+    return _item(name, TYPE_TARGET)
 
 
 def _program(name: str):
-    from robodk.robolink import ITEM_TYPE_PROGRAM
-    return _item(name, ITEM_TYPE_PROGRAM)
+    return _item(name, TYPE_PROGRAM)
 
 
 # ---------------------------------------------------------------------------
@@ -233,40 +256,35 @@ def list_objects_on_table(table_name: str,
 @mcp.tool()
 def list_programs() -> dict:
     """Names of all Program items."""
-    from robodk.robolink import ITEM_TYPE_PROGRAM
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_PROGRAM, True)]
+    names = [str(n) for n in get_rdk().ItemList(TYPE_PROGRAM, True)]
     return {"programs": names, "count": len(names)}
 
 
 @mcp.tool()
 def list_targets() -> dict:
     """Names of all Target items."""
-    from robodk.robolink import ITEM_TYPE_TARGET
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_TARGET, True)]
+    names = [str(n) for n in get_rdk().ItemList(TYPE_TARGET, True)]
     return {"targets": names, "count": len(names)}
 
 
 @mcp.tool()
 def list_robots() -> dict:
     """Names of all Robot items."""
-    from robodk.robolink import ITEM_TYPE_ROBOT
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_ROBOT, True)]
+    names = [str(n) for n in get_rdk().ItemList(TYPE_ROBOT, True)]
     return {"robots": names, "count": len(names)}
 
 
 @mcp.tool()
 def list_frames() -> dict:
     """Names of all reference Frame items."""
-    from robodk.robolink import ITEM_TYPE_FRAME
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_FRAME, True)]
+    names = [str(n) for n in get_rdk().ItemList(TYPE_FRAME, True)]
     return {"frames": names, "count": len(names)}
 
 
 @mcp.tool()
 def list_tools() -> dict:
     """Names of all Tool items."""
-    from robodk.robolink import ITEM_TYPE_TOOL
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_TOOL, True)]
+    names = [str(n) for n in get_rdk().ItemList(TYPE_TOOL, True)]
     return {"tools": names, "count": len(names)}
 
 
