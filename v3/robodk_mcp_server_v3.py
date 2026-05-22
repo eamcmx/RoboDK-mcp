@@ -43,10 +43,12 @@ Bugs fixed
 11. pixel_to_world   -- actually uses the camera frame's world pose when
     projecting (v2 returned multi-metre offsets for the image center).
 
+Version history
+---------------
 v3.0.1: ItemList(-1, 1) returned empty -- use filter=None for "all types".
-v3.0.2: Python ITEM_TYPE_* constants don't match the server's type codes in
-        some versions -- use server codes (1=Robot, 2=Frame, 3=Tool,
-        4=Object, 5=Target, 6=Program, 19=Camera) directly.
+v3.0.2: Tried server-specific 1-6 mapping (WRONG, reverted).
+v3.0.3: Standard ITEM_TYPE codes confirmed live: STATION=1, ROBOT=2,
+        FRAME=3, TOOL=4, OBJECT=5, TARGET=6, PROGRAM=8, CAMERA=19.
 
 Usage
 -----
@@ -97,22 +99,23 @@ def get_rdk():
 
 
 # ---------------------------------------------------------------------------
-# Server type codes (observed live)
+# Item type codes (RoboDK standard)
 # ---------------------------------------------------------------------------
-# The RoboDK server returns these integer type codes from `Item.Type()` and
-# accepts them as the `filter` argument to `Robolink.ItemList()`. The codes
-# DO NOT match the `ITEM_TYPE_*` constants in some `robodk` Python package
-# versions (which are shifted by one because `ITEM_TYPE_STATION = 1` was
-# inserted at the front). Using the server's codes directly avoids the
-# mismatch. v3.0.2 -- previously v3 imported the Python constants and every
-# robot/frame/tool/program lookup failed with "Item not found (type=N)".
+# Confirmed live (v3.0.3) against the Elsevier station:
+#   "Claude"           -> type 1 (STATION container)
+#   "UR5"              -> type 2 (ROBOT)         <- the actual robot
+#   "UR5 Base"         -> type 3 (FRAME)         <- robot's base frame
+#   "." (Dispenser)    -> type 4 (TOOL)          <- the attached tool
+#   Cubes / Table      -> type 5 (OBJECT)
+# Standard Python `ITEM_TYPE_*` constants match -- use them.
 
-TYPE_ROBOT   = 1
-TYPE_FRAME   = 2
-TYPE_TOOL    = 3
-TYPE_OBJECT  = 4
-TYPE_TARGET  = 5
-TYPE_PROGRAM = 6
+TYPE_STATION = 1
+TYPE_ROBOT   = 2
+TYPE_FRAME   = 3
+TYPE_TOOL    = 4
+TYPE_OBJECT  = 5
+TYPE_TARGET  = 6
+TYPE_PROGRAM = 8
 TYPE_CAMERA  = 19
 
 
@@ -121,21 +124,30 @@ TYPE_CAMERA  = 19
 # ---------------------------------------------------------------------------
 
 def _item(name: str, item_type: Optional[int] = None):
-    """Resolve an item by name.
+    """Resolve an item by name, optionally constrained by type.
 
-    `item_type` is a hint and is ignored if the untyped lookup already finds
-    a unique item -- this avoids the Python-constant-vs-server-code mismatch
-    documented above.
+    Strategy:
+      1. Typed lookup if item_type is given (handles name collisions across
+         types, e.g. an Object and a Frame with the same name).
+      2. Untyped lookup as fallback.
+      3. Case-insensitive scan through ItemList(item_type, True).
     """
     rdk = get_rdk()
+    if item_type is not None:
+        it = rdk.Item(name, item_type)
+        if it.Valid():
+            return it
     it = rdk.Item(name)
-    if it.Valid():
+    if it.Valid() and (item_type is None or it.Type() == item_type):
         return it
-    # Fallback: case-insensitive search through everything.
-    for n in rdk.ItemList(None, True):
+    # Case-insensitive scan within the requested type (or all if untyped).
+    scan_filter = item_type if item_type is not None else None
+    for n in rdk.ItemList(scan_filter, True):
         if str(n).lower() == name.lower():
-            return rdk.Item(n)
-    raise ValueError(f"Item '{name}' not found.")
+            return rdk.Item(n, item_type) if item_type is not None else rdk.Item(n)
+    raise ValueError(f"Item '{name}' not found"
+                     + (f" (type={item_type})" if item_type is not None else "")
+                     + ".")
 
 
 def _robot(name: str):
@@ -216,10 +228,7 @@ def get_connection_status() -> dict:
 
 @mcp.tool()
 def get_station_items() -> list:
-    """List every item in the station tree (name, type, valid).
-    FIX (v3.0.1): use filter=None for 'all types' (RoboDK treats -1 as the
-    nonexistent type -1, so the old `ItemList(-1, 1)` returned an empty list).
-    """
+    """List every item in the station tree (name, type, valid)."""
     rdk = get_rdk()
     items = []
     for name in rdk.ItemList(None, True):
@@ -291,8 +300,8 @@ def list_tools() -> dict:
 @mcp.tool()
 def find_items(pattern: str, item_type: Optional[int] = None) -> dict:
     """Glob-match items by name.
-    item_type uses RoboDK codes: 1=Robot, 2=Frame, 3=Tool, 4=Object,
-    5=Target, 6=Program, 19=Camera.
+    item_type uses standard RoboDK codes: 1=Station, 2=Robot, 3=Frame,
+    4=Tool, 5=Object, 6=Target, 8=Program, 19=Camera.
     """
     rdk = get_rdk()
     raw = rdk.ItemList(item_type, True) if item_type is not None else rdk.ItemList(None, True)

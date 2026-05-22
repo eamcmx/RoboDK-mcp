@@ -21,8 +21,6 @@ Usage
 Prereqs
 -------
 * RoboDK running with a station that has at least one Robot and one Frame.
-  The Elsevier demo station (UR5 "Claude" + Cubes + UR5 Base + Generic
-  Dispenser) is what v3 was developed against.
 * `pip install mcp robodk opencv-python-headless numpy`
 
 Exit code 0 if all tests pass or only SKIP; non-zero if any FAIL.
@@ -51,47 +49,35 @@ spec.loader.exec_module(v3)
 # -------- expected tool inventory --------------------------------------------
 
 EXPECTED_TOOLS = {
-    # Connectivity
     "get_connection_status",
-    # Station inspection
     "get_station_items", "list_objects_on_table", "list_programs",
     "list_targets", "list_robots", "list_frames", "list_tools", "find_items",
-    # Poses / kinematics
     "get_object_pose", "get_pose", "get_robot_joints", "get_tcp_pose",
     "solve_fk", "solve_ik", "solve_ik_all",
-    # Robot motion
     "set_robot_joints", "move_joint", "move_linear", "move_to_target",
     "set_robot_speed", "set_simulation_speed", "render",
     "move_joint_test", "move_linear_test",
-    # Programs / targets / frames / tools
     "add_target", "add_program", "program_add_move", "program_add_call",
     "program_add_wait", "program_clear", "get_program_instructions",
     "run_program", "program_make_robot_program",
     "add_frame", "set_active_tool", "add_tool_from_object",
-    # Scene objects
     "add_object_from_file", "set_object_pose", "set_item_pose",
     "set_object_color", "set_object_visible", "set_item_name", "set_parent",
     "delete_item", "bulk_delete", "attach_object_to_robot", "detach_object",
     "load_station", "save_station",
-    # Cameras & vision
     "add_camera", "set_camera_pose", "get_camera_image_path",
     "capture_snapshot", "detect_blobs", "detect_objects_by_color",
     "pixel_to_world",
-    # Collisions
     "check_collision", "check_ray_collision", "set_collision_detection",
     "get_all_collisions",
-    # Composite pipelines
     "plan_grasp_pose", "execute_pick", "execute_place", "vision_pick_by_color",
-    # Station I/O
     "get_param", "set_param", "set_run_mode", "show_message",
     "get_joint_limits", "set_joint_limits",
 }
 
 
-# -------- minimal test harness -----------------------------------------------
-
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
-results = []  # list of (category, name, status, detail)
+results = []
 
 
 def record(category, name, status, detail=""):
@@ -103,7 +89,6 @@ def record(category, name, status, detail=""):
 
 
 def run(category, name, fn, *args, skip_if=None, **kwargs):
-    """Call fn, record PASS/FAIL/SKIP."""
     if skip_if:
         record(category, name, SKIP, skip_if)
         return None
@@ -122,14 +107,11 @@ def run(category, name, fn, *args, skip_if=None, **kwargs):
         return None
 
 
-# -------- main ---------------------------------------------------------------
-
 def main():
     print("=" * 78)
     print("v3 smoke test")
     print("=" * 78)
 
-    # 1. Tool registration check ---------------------------------------------
     print("\n[1] Tool registration")
     registered = {name for name in dir(v3)
                   if callable(getattr(v3, name)) and not name.startswith("_")}
@@ -147,33 +129,37 @@ def main():
         record("registration", "extra_tools", PASS,
                f"extras: {sorted(extra)}")
 
-    # 2. Connectivity ---------------------------------------------------------
     print("\n[2] Connectivity")
     cs = run("connectivity", "get_connection_status", v3.get_connection_status)
     if not (cs and cs.get("connected")):
         print("\n!! Not connected to RoboDK -- aborting live tests.")
         return summary(strict=False)
 
-    # 3. Discover the station -------------------------------------------------
     print("\n[3] Station inspection")
     items = run("inspect", "get_station_items", v3.get_station_items)
     if not items:
         return summary(strict=True)
 
-    robots = [it["name"] for it in items if it["type"] == 1]
-    frames = [it["name"] for it in items if it["type"] == 2]
-    tools  = [it["name"] for it in items if it["type"] == 3]
-    objs   = [it["name"] for it in items if it["type"] == 4]
-    targs  = [it["name"] for it in items if it["type"] == 5]
+    # Standard RoboDK ITEM_TYPE codes
+    # 1=STATION, 2=ROBOT, 3=FRAME, 4=TOOL, 5=OBJECT, 6=TARGET, 8=PROGRAM
+    robots = [it["name"] for it in items if it["type"] == 2]
+    frames = [it["name"] for it in items if it["type"] == 3]
+    tools  = [it["name"] for it in items if it["type"] == 4]
+    objs   = [it["name"] for it in items if it["type"] == 5]
+    targs  = [it["name"] for it in items if it["type"] == 6]
 
     robot_name = robots[0] if robots else None
     frame_name = frames[0] if frames else None
     target_name = targs[0] if targs else None
     object_name = objs[0] if objs else None
     tool_name = tools[0] if tools else None
+    # Fall back to an Object named Table if no Target item exists
+    table_name = (target_name or
+                  next((o for o in objs if o.lower() == "table"), None) or
+                  object_name)
 
     print(f"   robot={robot_name}  frame={frame_name}  target={target_name}")
-    print(f"   object={object_name}  tool={tool_name}")
+    print(f"   object={object_name}  tool={tool_name}  table={table_name}")
 
     run("inspect", "list_programs", v3.list_programs)
     run("inspect", "list_targets", v3.list_targets)
@@ -181,13 +167,12 @@ def main():
     run("inspect", "list_frames", v3.list_frames)
     run("inspect", "list_tools", v3.list_tools)
     run("inspect", "find_items", v3.find_items, "Cube*")
-    if target_name:
+    if table_name:
         run("inspect", "list_objects_on_table", v3.list_objects_on_table,
-            target_name, z_tolerance_mm=200)
+            table_name, z_tolerance_mm=200)
     else:
-        record("inspect", "list_objects_on_table", SKIP, "no table target found")
+        record("inspect", "list_objects_on_table", SKIP, "no table-like item")
 
-    # 4. Poses / kinematics ---------------------------------------------------
     print("\n[4] Poses / kinematics")
     home = [0, -90, -90, -90, 90, 0]
     if not robot_name:
@@ -215,7 +200,6 @@ def main():
                     record("kin", "solve_ik_all_shape", PASS,
                            f"{ik_all['num_solutions']} solutions, each 6-dof")
 
-    # 5. Motion ---------------------------------------------------------------
     print("\n[5] Motion (snap-only; no big moves)")
     if robot_name:
         run("motion", "set_robot_joints", v3.set_robot_joints,
@@ -224,16 +208,13 @@ def main():
             robot_name, 200.0)
         run("motion", "set_simulation_speed", v3.set_simulation_speed, 5)
         run("motion", "render", v3.render, refresh=True)
-        # MoveJ a tiny delta to verify it actually moves
         run("motion", "move_joint(tiny)", v3.move_joint,
             robot_name, [0, -90, -90, -90, 90, 1], blocking=True)
         run("motion", "move_joint(home)", v3.move_joint,
             robot_name, home, blocking=True)
-        # MoveJ_Test
         run("motion", "move_joint_test", v3.move_joint_test,
             robot_name, home, [0, -90, -90, -90, 90, 5])
 
-    # 6. Programs / targets ---------------------------------------------------
     print("\n[6] Programs / targets / frames")
     tgt_name = "_v3test_target"
     prog_name = "_v3test_program"
@@ -254,14 +235,12 @@ def main():
         run("progtgt", "get_program_instructions",
             v3.get_program_instructions, prog_name)
         run("progtgt", "program_clear", v3.program_clear, prog_name)
-        # Cleanup
         run("progtgt", "delete_item(target)", v3.delete_item, tgt_name)
         run("progtgt", "delete_item(program)", v3.delete_item, prog_name)
         run("progtgt", "delete_item(frame)", v3.delete_item, frame_test)
     else:
         record("progtgt", "*", SKIP, "robot or frame missing")
 
-    # 7. Tools / TCP ----------------------------------------------------------
     print("\n[7] Tools / TCP")
     if robot_name and tool_name:
         run("tools", "set_active_tool", v3.set_active_tool,
@@ -269,7 +248,6 @@ def main():
     else:
         record("tools", "set_active_tool", SKIP, "robot or tool missing")
 
-    # 8. Scene mutation (safe, reversible) -----------------------------------
     print("\n[8] Scene mutation")
     if object_name or target_name:
         victim = object_name or target_name
@@ -288,7 +266,6 @@ def main():
     else:
         record("scene", "*", SKIP, "no object/target")
 
-    # 9. Cameras --------------------------------------------------------------
     print("\n[9] Cameras")
     cam_name = "_v3test_cam"
     if frame_name:
@@ -311,7 +288,6 @@ def main():
     else:
         record("cam", "*", SKIP, "no frame")
 
-    # 10. Collisions ---------------------------------------------------------
     print("\n[10] Collisions")
     run("collision", "set_collision_detection(on)",
         v3.set_collision_detection, True)
@@ -322,7 +298,6 @@ def main():
     run("collision", "check_ray_collision", v3.check_ray_collision,
         0, 0, 1000, 0, 0, -100)
 
-    # 11. Station I/O --------------------------------------------------------
     print("\n[11] Station I/O")
     run("io", "get_param(PATH_OPENSTATION)",
         v3.get_param, "PATH_OPENSTATION")
