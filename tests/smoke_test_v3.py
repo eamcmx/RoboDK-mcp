@@ -46,8 +46,6 @@ v3 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(v3)
 
 
-# -------- expected tool inventory --------------------------------------------
-
 EXPECTED_TOOLS = {
     "get_connection_status",
     "get_station_items", "list_objects_on_table", "list_programs",
@@ -202,6 +200,10 @@ def main():
 
     print("\n[5] Motion (snap-only; no big moves)")
     if robot_name:
+        # Disable collision detection so leftover collision state from a
+        # previous test run doesn't block a clean MoveJ. We re-enable it
+        # in step 10 below.
+        v3.set_collision_detection(False)
         run("motion", "set_robot_joints", v3.set_robot_joints,
             robot_name, home)
         run("motion", "set_robot_speed", v3.set_robot_speed,
