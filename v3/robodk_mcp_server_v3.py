@@ -43,6 +43,8 @@ Bugs fixed
 11. pixel_to_world   -- actually uses the camera frame's world pose when
     projecting (v2 returned multi-metre offsets for the image center).
 
+v3.0.1: ItemList(-1, 1) returned empty -- use filter=None for "all types".
+
 Usage
 -----
   python robodk_mcp_server_v3.py
@@ -102,7 +104,7 @@ def _item(name: str, item_type: Optional[int] = None):
     if it.Valid():
         return it
     if item_type is not None:
-        for n in rdk.ItemList(item_type, 1):
+        for n in rdk.ItemList(item_type, True):
             if str(n).lower() == name.lower():
                 return rdk.Item(n, item_type)
     raise ValueError(f"Item '{name}' not found (type={item_type}).")
@@ -191,10 +193,13 @@ def get_connection_status() -> dict:
 
 @mcp.tool()
 def get_station_items() -> list:
-    """List every item in the station tree (name, type, valid)."""
+    """List every item in the station tree (name, type, valid).
+    FIX (v3.0.1): use filter=None for 'all types' (RoboDK treats -1 as the
+    nonexistent type -1, so the old `ItemList(-1, 1)` returned an empty list).
+    """
     rdk = get_rdk()
     items = []
-    for name in rdk.ItemList(-1, 1):
+    for name in rdk.ItemList(None, True):
         it = rdk.Item(name)
         items.append({"name": str(name), "type": it.Type(),
                       "valid": it.Valid()})
@@ -209,7 +214,7 @@ def list_objects_on_table(table_name: str,
     table = _item(table_name)
     table_z = table.PoseAbs().Pos()[2]
     found = []
-    for name in rdk.ItemList(-1, 1):
+    for name in rdk.ItemList(None, True):
         it = rdk.Item(name)
         if not it.Valid():
             continue
@@ -229,7 +234,7 @@ def list_objects_on_table(table_name: str,
 def list_programs() -> dict:
     """Names of all Program items."""
     from robodk.robolink import ITEM_TYPE_PROGRAM
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_PROGRAM, 1)]
+    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_PROGRAM, True)]
     return {"programs": names, "count": len(names)}
 
 
@@ -237,7 +242,7 @@ def list_programs() -> dict:
 def list_targets() -> dict:
     """Names of all Target items."""
     from robodk.robolink import ITEM_TYPE_TARGET
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_TARGET, 1)]
+    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_TARGET, True)]
     return {"targets": names, "count": len(names)}
 
 
@@ -245,7 +250,7 @@ def list_targets() -> dict:
 def list_robots() -> dict:
     """Names of all Robot items."""
     from robodk.robolink import ITEM_TYPE_ROBOT
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_ROBOT, 1)]
+    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_ROBOT, True)]
     return {"robots": names, "count": len(names)}
 
 
@@ -253,7 +258,7 @@ def list_robots() -> dict:
 def list_frames() -> dict:
     """Names of all reference Frame items."""
     from robodk.robolink import ITEM_TYPE_FRAME
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_FRAME, 1)]
+    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_FRAME, True)]
     return {"frames": names, "count": len(names)}
 
 
@@ -261,7 +266,7 @@ def list_frames() -> dict:
 def list_tools() -> dict:
     """Names of all Tool items."""
     from robodk.robolink import ITEM_TYPE_TOOL
-    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_TOOL, 1)]
+    names = [str(n) for n in get_rdk().ItemList(ITEM_TYPE_TOOL, True)]
     return {"tools": names, "count": len(names)}
 
 
@@ -272,7 +277,7 @@ def find_items(pattern: str, item_type: Optional[int] = None) -> dict:
     5=Target, 6=Program, 19=Camera.
     """
     rdk = get_rdk()
-    raw = rdk.ItemList(item_type if item_type is not None else -1, 1)
+    raw = rdk.ItemList(item_type, True) if item_type is not None else rdk.ItemList(None, True)
     matches = [str(n) for n in raw if fnmatch.fnmatchcase(str(n), pattern)]
     return {"pattern": pattern, "item_type": item_type,
             "matches": matches, "count": len(matches)}
