@@ -1,5 +1,55 @@
 # Changelog
 
+## v3.0.0 (2026-05-22)
+
+Complete rewrite of the MCP server. **~71 tools** (vs 41 in v2), every known
+v2 bug fixed, and new capabilities for building targets, programs, frames,
+and tools directly from chat without side-channel Python or MATLAB scripts.
+
+### Added
+
+- **Targets / Programs:** `add_target`, `add_program`, `program_add_move`,
+  `program_add_call`, `program_add_wait`, `program_clear`,
+  `get_program_instructions`, `program_make_robot_program`
+- **Frames / Tools:** `add_frame`, `set_active_tool`, `add_tool_from_object`
+- **Generic items:** `get_pose`, `set_item_pose`, `set_item_name`, `set_parent`
+- **Lists / search:** `list_targets`, `list_robots`, `list_frames`,
+  `list_tools`, `find_items`, `bulk_delete`
+- **Motion testing:** `move_joint_test`, `move_linear_test`
+- **Station I/O:** `save_station`, `get_param`, `set_param`, `set_run_mode`,
+  `show_message`
+- **Joint limits:** `get_joint_limits`, `set_joint_limits`
+
+### Fixed (11 v2 bugs)
+
+1. `solve_ik_all` returns proper N×6 array.
+2. `get_all_collisions` pairs list matches the count.
+3. `list_objects_on_table` returns real names (no more `"."`).
+4. Robot name resolution accepts display name (e.g. `"Claude"`) not only the
+   underlying name (`"UR5"`).
+5. `move_linear` pre-seeds from current joints and falls back through a MoveJ
+   to align the IK branch (no more `"Joint axes outside limits"` on
+   reachable poses).
+6. `move_to_target` uses `ITEM_TYPE_TARGET` so it no longer fails on names
+   that exist as both a Target and another type.
+7. `add_camera` returns JSON-serializable metadata (v2 raised
+   `"Object of type Item is not JSON serializable"`).
+8. `add_camera` honors the `camera_name` argument (v2 ignored it).
+9. `capture_snapshot` base64 payload is opt-in (default response is just the
+   file path; v2 always returned ~400 KB and blew the context window).
+10. `detect_blobs` and `detect_objects_by_color` early-exit on near-uniform
+    scenes (v2 timed out on blank views).
+11. `pixel_to_world` actually uses the camera frame's world pose for ray
+    projection (v2 returned multi-metre offsets for the image center).
+
+### Documentation
+
+- `v3/README.md` - install, run, full tool list
+- `docs/TOOLS_v2_AUDIT.md` - live-tested v2 reference + bug log
+- `docs/GAPS_v2_AUDIT.md` - gap analysis that motivated v3
+
+---
+
 ## v2.0.0 (2026-05-20)
 
 ### Added
