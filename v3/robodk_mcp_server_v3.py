@@ -49,6 +49,9 @@ v3.0.1: ItemList(-1, 1) returned empty -- use filter=None for "all types".
 v3.0.2: Tried server-specific 1-6 mapping (WRONG, reverted).
 v3.0.3: Standard ITEM_TYPE codes confirmed live: STATION=1, ROBOT=2,
         FRAME=3, TOOL=4, OBJECT=5, TARGET=6, PROGRAM=8, CAMERA=19.
+v3.0.4: Mat.tolist() shape fix in get_robot_joints, SolveIK size() tuple
+        unpack, JointLimits 3-tuple unpack, motion tools catch StoppedError
+        instead of crashing.
 
 Usage
 -----
@@ -339,7 +342,7 @@ def get_robot_joints(robot_name: str) -> dict:
     """Current robot joints in degrees."""
     r = _robot(robot_name)
     return {"robot": r.Name(),
-            "joints_deg": list(r.Joints().tolist()[0])}
+            "joints_deg": list(r.Joints().tolist())}
 
 
 @mcp.tool()
@@ -374,7 +377,8 @@ def solve_ik(robot_name: str, pose: Any,
     if joints_seed is not None:
         r.setJoints(joints_seed)
     sol = r.SolveIK(p)
-    joints_out = list(sol.tolist()[0]) if sol.size() > 0 else []
+    rows = sol.size()[0] if sol.size() else 0
+    joints_out = list(sol.tolist()) if rows > 0 else []
     return {"robot": r.Name(), "joints_deg": joints_out}
 
 
@@ -409,9 +413,15 @@ def set_robot_joints(robot_name: str, joints: list) -> dict:
 
 @mcp.tool()
 def move_joint(robot_name: str, joints: list, blocking: bool = True) -> dict:
-    """MoveJ to joint angles (degrees)."""
+    """MoveJ to joint angles (degrees).
+    Returns {"error": ...} if a collision or joint limit stops the move
+    instead of raising (v3.0.4)."""
     r = _robot(robot_name)
-    r.MoveJ(joints, blocking)
+    try:
+        r.MoveJ(joints, blocking)
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}",
+                "robot": r.Name(), "target_joints": joints}
     return {"robot": r.Name(), "moved_to_joints": joints}
 
 
@@ -419,18 +429,25 @@ def move_joint(robot_name: str, joints: list, blocking: bool = True) -> dict:
 def move_linear(robot_name: str, pose: Any, blocking: bool = True) -> dict:
     """MoveL to a Cartesian pose (FIX: pre-seeds and falls back via MoveJ).
     pose: 4x4 nested list or 16-element flat list (mm).
+    Returns {"error": ...} on collision / joint limit / IK failure.
     """
     r = _robot(robot_name)
     p = _mat(pose)
     current = r.Joints()
     try:
         r.MoveL(p, blocking)
-    except Exception as e:
-        target_joints = r.SolveIK(p, current)
-        if target_joints.size() == 0:
-            return {"error": f"no IK solution for pose: {e}"}
-        r.MoveJ(target_joints, blocking)
-        r.MoveL(p, blocking)
+    except Exception as e1:
+        # Try a MoveJ-to-IK fallback to align the branch, then MoveL again.
+        try:
+            target_joints = r.SolveIK(p, current)
+            rows = target_joints.size()[0] if target_joints.size() else 0
+            if rows == 0:
+                return {"error": f"no IK solution for pose: {e1}"}
+            r.MoveJ(target_joints, blocking)
+            r.MoveL(p, blocking)
+        except Exception as e2:
+            return {"error": f"{type(e2).__name__}: {e2}",
+                    "robot": r.Name(), "moved_to": _xyz(p)}
     return {"robot": r.Name(), "moved_to": _xyz(p)}
 
 
@@ -1197,9 +1214,14 @@ def show_message(text: str, popup: bool = False) -> dict:
 
 @mcp.tool()
 def get_joint_limits(robot_name: str) -> dict:
-    """Per-joint lower/upper limits in degrees."""
+    """Per-joint lower/upper limits in degrees.
+    Some RoboDK versions also return joint_types as a third element;
+    we ignore extras (v3.0.4)."""
     r = _robot(robot_name)
-    lo, hi = r.JointLimits()
+    result = r.JointLimits()
+    # JointLimits returns (lower, upper) in older versions and
+    # (lower, upper, joint_types) in newer ones.
+    lo, hi = result[0], result[1]
     return {"robot": r.Name(),
             "lower_deg": list(lo), "upper_deg": list(hi)}
 
