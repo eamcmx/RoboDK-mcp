@@ -1,8 +1,9 @@
-# RoboDK-mcp v3
+# RoboDK-mcp v3 (current: v3.1.0)
 
-Complete rewrite of the v2 server. **~71 tools** (vs 41 in v2), every known v2
-bug fixed, and new capabilities for building targets, programs, frames, and
-tools directly from chat without side-channel Python or MATLAB scripts.
+Complete rewrite of the v2 server. **~71 tools** (vs 41 in v2), every known
+v2/v3 bug fixed (13 total), and new capabilities for building targets,
+programs, frames, and tools directly from chat without side-channel Python
+or MATLAB scripts.
 
 ## Install
 
@@ -59,6 +60,52 @@ python v3/robodk_mcp_server_v3.py --host 192.168.1.50 --port 20500
 10. **`detect_blobs` / `detect_objects_by_color`** — fast early-exit on near-uniform scenes so a blank camera doesn't hang the LLM turn.
 11. **`pixel_to_world`** — actually uses the camera frame's world pose when projecting (v2 returned multi-metre offsets for the image center).
 
+## What's new in v3.1
+
+### Bugs fixed (vs v3.0)
+
+12. **`get_tcp_pose`** — now returns the TCP **in world coordinates** as the docstring promises. v3 returned `SolveFK(Joints) * PoseTool`, i.e. the TCP in the *robot's own base frame*, breaking every cross-robot relative-pose computation (two robots at identical joints reported identical TCPs even when their bases were 1050 mm apart).
+13. **`get_robot_joints`** — no longer raises `'float' object is not iterable`. Now uses the documented `Mat.list()` method instead of `Mat.tolist()[0]`.
+
+### Server `instructions` (dual-robot guide)
+
+The server now ships a dual-robot coordination guide in its `instructions`
+field (`v3/instructions.py`). Every LLM that loads this MCP automatically
+sees:
+
+- **Four frame-handling rules** that eliminate the silent failures we hit
+  in multi-robot setups (world-TCP computation, slave IK pinning, target
+  frame conversion, IK seeding).
+- **Master-slave TCP sync pattern** including the reach precheck.
+- **Dual-arm handover, dual-arm pick-and-place, and collision-aware
+  coordinated motion** recipes.
+- **MATLAB-style Newton-Jacobian IK fallback** with the 12-residual /
+  pseudo-inverse formulation, for cases where RoboDK's built-in IK flips
+  branches or refuses near-singular targets.
+- **Pitfall table** — symptom → cause → fix, drawn from real sessions.
+
+See `v3/instructions.py` for the full text and edit history.
+
+## Dual-robot coordination — worked example
+
+`v3/examples/example_dual_ur5_master_slave.py` loads the bundled station at
+`v3/examples/stations/Dual UR5t.rdk` (two UR5s already positioned to face
+each other), captures the tool-to-tool offset, and keeps the slave locked
+to the master while you drag UR51 in the 3D view.
+
+```bash
+pip install robodk
+python v3/examples/example_dual_ur5_master_slave.py
+```
+
+Then drag or jog **UR51** in RoboDK; **UR52** mirrors it preserving the
+offset captured at start-up. Stop with `Ctrl+C`.
+
+The example is intentionally self-contained — it doesn't depend on the MCP
+server being running, so you can validate your robodk install before
+wiring up Claude Desktop.
+
 ## Tool reference
 
-See [`docs/TOOLS.md`](../docs/TOOLS.md) for the full per-tool reference (signatures, params, returns, underlying RoboDK API mapping).
+See [`docs/TOOLS.md`](../docs/TOOLS.md) for the full per-tool reference
+(signatures, params, returns, underlying RoboDK API mapping).
