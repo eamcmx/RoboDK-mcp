@@ -3,8 +3,9 @@
 Connect Claude (or any [Model Context Protocol](https://modelcontextprotocol.io)
 client) directly to **RoboDK**. Control robots in natural language: build
 targets and programs, move joints, solve inverse kinematics, capture camera
-frames, run computer vision, manipulate objects, check collisions, and execute
-vision-guided pick & place — all from chat.
+frames, run computer vision, manipulate objects, check collisions, execute
+vision-guided pick & place, and coordinate dual-arm synchronised motion —
+all from chat.
 
 ## Demo
 
@@ -17,7 +18,7 @@ https://github.com/user-attachments/assets/8995e3a9-16ba-4fcb-9efc-c9d3e7ef18b0
 
 | Version | Tools | Status |
 |---|---|---|
-| **v3** (current) | **~71** | Recommended. Full coverage of the RoboDK Python API surface that matters in chat: targets, programs, frames, active tool, save station, motion testing, generic pose handling. Every known v2 bug fixed. |
+| **v3** (current) | **~74** | Recommended. Full coverage of the RoboDK Python API surface that matters in chat: targets, programs, frames, active tool, save station, motion testing, generic pose handling, master-slave sync. Every known v2 bug fixed. |
 | v2 | ~41 | Stable, kept for backwards compatibility. |
 | v1 | ~20 | Original release — robot motion + kinematics only. |
 
@@ -30,15 +31,22 @@ v1/   robodk_mcp_server.py             original release (~20 tools)
 v2/   robodk_mcp_server_v2.py          + cameras, vision, objects, pick & place
 v3/   robodk_mcp_server_v3.py          + targets, programs, frames, active tool,
       README.md                        save station, generic pose, joint limits,
-                                       11 v2 bug fixes -- 57/57 smoke tests pass
+                                       master-slave sync, 11 v2 bug fixes
+
+skills/                                Cowork skills (installable .skill bundles)
+  robodk-dual-arm-trajectory/
+    SKILL.md                           Claude skill for dual-arm trajectory motion
+    scripts/
+      reset_pose.py                    Reset both arms to initial joints
+      probe_workspace.py               Reachability map in ZY world plane
+      square_trajectory.py            Configurable square trajectory via iterative IK
 
 docs/ TOOLS_v2_AUDIT.md                live-tested v2 reference + bug log
       GAPS_v2_AUDIT.md                 gap analysis that motivated v3
 
-tests/ smoke_test_v3.py                live test harness for all 71 v3 tools
+tests/ smoke_test_v3.py                live test harness for all v3 tools
 
 station/ Claude.rdk                    demo station used throughout this README
-ClaudeRoboDK.mp4                       demo video embedded above
 CHANGELOG.md                           per-version changelog
 ```
 
@@ -96,12 +104,70 @@ code 0 if everything green. Against `Claude.rdk` the expected result is
 | **Station inspection** | `get_station_items`, `list_objects_on_table`, `list_programs`, `list_targets`, `list_robots`, `list_frames`, `list_tools`, `find_items` |
 | **Poses / kinematics** | `get_object_pose`, `get_pose`, `get_robot_joints`, `get_tcp_pose`, `solve_fk`, `solve_ik`, `solve_ik_all` |
 | **Robot motion** | `set_robot_joints`, `move_joint`, `move_linear`, `move_to_target`, `set_robot_speed`, `set_simulation_speed`, `render`, `move_joint_test`, `move_linear_test` |
-| **Programs / targets / frames / tools** (new in v3) | `add_target`, `add_program`, `program_add_move`, `program_add_call`, `program_add_wait`, `program_clear`, `get_program_instructions`, `run_program`, `program_make_robot_program`, `add_frame`, `set_active_tool`, `add_tool_from_object` |
+| **Programs / targets / frames / tools** | `add_target`, `add_program`, `program_add_move`, `program_add_call`, `program_add_wait`, `program_clear`, `get_program_instructions`, `run_program`, `program_make_robot_program`, `add_frame`, `set_active_tool`, `add_tool_from_object` |
+| **Master-slave sync** | `start_master_slave_sync`, `stop_master_slave_sync`, `get_master_slave_sync_status` |
 | **Scene objects** | `add_object_from_file`, `set_object_pose`, `set_item_pose`, `set_object_color`, `set_object_visible`, `set_item_name`, `set_parent`, `delete_item`, `bulk_delete`, `attach_object_to_robot`, `detach_object`, `load_station`, `save_station` |
 | **Cameras & vision** | `add_camera`, `set_camera_pose`, `get_camera_image_path`, `capture_snapshot`, `detect_blobs`, `detect_objects_by_color`, `pixel_to_world` |
 | **Collisions** | `check_collision`, `check_ray_collision`, `set_collision_detection`, `get_all_collisions` |
 | **Composite pipelines** | `plan_grasp_pose`, `execute_pick`, `execute_place`, `vision_pick_by_color` |
 | **Station I/O** | `get_param`, `set_param`, `set_run_mode`, `show_message`, `get_joint_limits`, `set_joint_limits` |
+
+## Skills
+
+This repo includes [Cowork](https://claude.ai/download) skills — installable
+bundles that teach Claude specialised workflows on top of the MCP server.
+Each skill lives in `skills/<name>/` and ships as a `.skill` file.
+
+### `robodk-dual-arm-trajectory`
+
+Drives a **master arm** along any Cartesian trajectory (square, line, circle,
+or arbitrary waypoints) while the **slave arm** follows automatically via
+master-slave sync. Validated on the Motoman SDA10F dual-arm station.
+
+What it encodes (hard-won through live debugging):
+
+- **Base-frame conversion** — sub-robots (SDA10F, NEXTAGE) have bases that
+  are not at world origin; `SolveIK` silently fails 100% of the time if you
+  pass a world-frame pose. The skill always applies `invH(parent.PoseAbs()) * T_world`.
+- **Flat `sol.tolist()`** — the Python API returns a flat joint list, not a
+  nested array. Indexing with `[0]` extracts a scalar, not a joint vector.
+- **Joint seeding** — passing `robot.Joints().list()` as the IK seed keeps
+  the solver on the same branch and prevents jerks between steps.
+- **Workspace probing** — before committing to a trajectory, `probe_workspace.py`
+  sweeps the reachable ZY plane and reports the maximum square size and the
+  optimal start-corner offsets.
+
+Bundled scripts:
+
+| Script | Purpose |
+|---|---|
+| `reset_pose.py` | Reset both arms to initial joints |
+| `probe_workspace.py` | Print ASCII reachability map + max square table |
+| `square_trajectory.py` | Execute a configurable square (size, offset, step rate) |
+
+**Install:** download `robodk-dual-arm-trajectory.skill` from the [releases page](../../releases)
+or build it locally:
+
+```bash
+python -m scripts.package_skill skills/robodk-dual-arm-trajectory
+```
+
+then open Cowork and click **Save skill** on the `.skill` file.
+
+## Master-slave sync tools
+
+v3 adds three tools for locking two robots in real-time coordinated motion:
+
+| Tool | Description |
+|---|---|
+| `start_master_slave_sync` | Captures the current tool-to-tool transform and starts a 30 Hz daemon that continuously solves slave IK to maintain the offset as the master moves |
+| `stop_master_slave_sync` | Stops the sync daemon |
+| `get_master_slave_sync_status` | Returns running state, Hz, reachable/unreachable tick counts |
+
+The sync daemon uses the same base-frame IK pattern as the trajectory skill:
+`T_rel = invH(world_tcp(master)) * world_tcp(slave)` captured once at start,
+then applied every tick. This is what enables the slave to track the master
+during trajectory execution without any additional coordination code.
 
 ## What's new in v3 (vs v2)
 
@@ -115,6 +181,11 @@ Program item in the station tree, runnable from the GUI or via `run_program`.
 `add_tool_from_object`. Attaching a dispenser, gripper or scribe to the
 robot's flange makes the entire FK/IK chain operate on the tool tip — no
 more manual offset math.
+
+**Master-slave sync.** Three new tools (`start_master_slave_sync`,
+`stop_master_slave_sync`, `get_master_slave_sync_status`) lock two robots in
+real-time coordinated motion. The daemon captures the tool-to-tool transform
+at startup and maintains it at 30 Hz as the master moves.
 
 **11 v2 bugs fixed:**
 
@@ -184,18 +255,15 @@ Real prompts that worked end-to-end against the demo station:
 - *"Weave the tool through the gaps between the cubes without touching any of them."*
 - *"Slow the simulation to 1× and the robot speed to 150 mm/s, then re-run the touch sequence."*
 - *"Solve IK for a downward-pointing TCP at world (300, −250, 200), and show me the joint angles."*
-- *"Build a Program that visits each cube top in order, save it to the station so I can run it from the GUI."* (v3 only)
-- *"Make the Generic Dispenser the active TCP, then solve IK so the dispenser tip lands on Cube3."* (v3 only)
-- *"Save the station to disk."* (v3 only)
-
-For each, the assistant chains the relevant tools — typically
-`get_object_pose` → compute target → `solve_ik` → `move_joint` — without you
-writing a line of robot code.
+- *"Build a Program that visits each cube top in order, save it to the station so I can run it from the GUI."* (v3)
+- *"Make the Generic Dispenser the active TCP, then solve IK so the dispenser tip lands on Cube3."* (v3)
+- *"Save the station to disk."* (v3)
+- *"Start master-slave sync on the SDA10F, then move the right arm in a 300 mm square on the ZY plane."* (v3 + skill)
 
 ## Architecture
 
 ```
-MCP client (Claude Desktop / Claude Code / etc.)
+MCP client (Claude Desktop / Cowork / etc.)
         |
         | MCP over stdio
         v
@@ -222,6 +290,11 @@ RoboDK is restarted between tool calls.
   pre-position the robot near the previous target (via `set_robot_joints` or
   the `joints_seed` argument) before re-solving to keep the arm in a
   consistent branch.
+- **Sub-robot IK via MCP tools:** `solve_ik` and `move_linear` pass
+  world-frame poses directly to `SolveIK`, which silently fails for sub-robots
+  (SDA10F, NEXTAGE) whose bases are not at world origin. Use the
+  `robodk-dual-arm-trajectory` skill or direct Robolink scripts for these
+  robots — they apply the required `invH(base) * T_world` conversion.
 - **`pixel_to_world`** uses a pinhole approximation. Accurate FOV and a
   correct table-Z assumption are required for the projection to land on the
   real world point.
