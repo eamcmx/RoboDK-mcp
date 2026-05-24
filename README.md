@@ -1,3 +1,6 @@
+
+
+
 # RoboDK MCP Server
 
 Connect Claude (or any [Model Context Protocol](https://modelcontextprotocol.io)
@@ -119,6 +122,9 @@ bundles that teach Claude specialised workflows on top of the MCP server.
 Each skill lives in `skills/<name>/` and ships as a `.skill` file.
 
 ### `robodk-dual-arm-trajectory`
+
+
+https://github.com/user-attachments/assets/544b3948-6d18-48f9-9feb-b57c520adaf2
 
 Drives a **master arm** along any Cartesian trajectory (square, line, circle,
 or arbitrary waypoints) while the **slave arm** follows automatically via
