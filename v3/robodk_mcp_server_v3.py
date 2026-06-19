@@ -1,11 +1,29 @@
 """
-RoboDK MCP Server -- v3
-=======================
-Complete rewrite of the v2 server. Adds ~30 new tools and fixes 11 documented
-bugs while keeping the v2 tool names backwards-compatible.
+RoboDK MCP Server -- v3.1
+=========================
+Patch release on top of v3 (commit 890f7f6). Two correctness fixes and one
+prompt-engineering improvement; tool surface is unchanged.
 
-What's new vs v2
+What's new vs v3
 ----------------
+* Server `instructions` field now carries the **Dual-Robot Coordination**
+  guide (see ``instructions.py``). Every LLM that loads this MCP sees the
+  guide automatically, eliminating the need to re-derive the master-slave,
+  handover, and frame-handling patterns from scratch.
+
+Bugs fixed (vs v3)
+------------------
+12. ``get_tcp_pose`` -- now returns the TCP **in world coordinates** as the
+    docstring promises. v3 returned ``SolveFK(Joints) * PoseTool``, which is
+    the TCP in the *robot's own base frame*, not world. With multiple robots
+    sharing a station, two robots at identical joints reported identical TCPs
+    even when their bases were 1050 mm apart.
+13. ``get_robot_joints`` -- no longer raises ``'float' object is not
+    iterable`` on robodk Python wrappers that return a flat list from
+    ``Joints().tolist()``. Now uses the documented ``Mat.list()`` method.
+
+What's new vs v2 (carried over from v3)
+---------------------------------------
 * Targets / Programs / Frames / Tools
     add_target, add_program, program_add_move, program_add_call, program_add_wait,
     program_clear, get_program_instructions, program_make_robot_program,
@@ -21,27 +39,19 @@ What's new vs v2
 * Joint limits
     get_joint_limits, set_joint_limits
 
-Bugs fixed
-----------
-1. solve_ik_all      -- returns N x 6 (v2 returned a flattened single solution).
-2. get_all_collisions-- pairs list matches the count (v2 returned count=1, pairs=[]).
-3. list_objects_on_table -- returns the real name, not "." for attached objects.
-4. Robot name resolution -- accepts the display name ("Claude") not only the
-   underlying robot name ("UR5"). All *_robot helpers normalise via _robot().
-5. move_linear       -- pre-seeds from current joints, falls back through a
-   MoveJ to align IK branch before MoveL. No more "Joint axes outside limits"
-   on reachable targets.
-6. move_to_target    -- looks up the target with ITEM_TYPE_TARGET so the
-   target name no longer collides with an object of the same name.
-7. add_camera        -- returns JSON-serializable metadata. Honours
-   camera_name. (v2 raised "Object of type Item is not JSON serializable".)
-8. add_camera        -- honours the camera_name argument (v2 ignored it).
-9. capture_snapshot  -- base64 payload is opt-in. Default response is just
-   the file path (v2 always returned ~400 KB and blew the context window).
-10. detect_blobs / detect_objects_by_color -- fast early-exit on near-uniform
-    scenes so a blank camera doesn't hang the LLM turn.
-11. pixel_to_world   -- actually uses the camera frame's world pose when
-    projecting (v2 returned multi-metre offsets for the image center).
+Bugs fixed (carried over from v3, vs v2)
+----------------------------------------
+1.  solve_ik_all       N x 6 (was flattened single solution)
+2.  get_all_collisions pairs match the count
+3.  list_objects_on_table real names instead of "."
+4.  Robot name resolution accepts display name
+5.  move_linear pre-seeds and falls back via MoveJ
+6.  move_to_target uses ITEM_TYPE_TARGET
+7.  add_camera returns JSON-serializable metadata
+8.  add_camera honours camera_name
+9.  capture_snapshot base64 payload is opt-in
+10. detect_blobs / detect_objects_by_color early-exit on uniform scenes
+11. pixel_to_world uses the camera frame's world pose
 
 Usage
 -----
@@ -65,6 +75,17 @@ from typing import Any, Optional
 import numpy as np
 
 from mcp.server.fastmcp import FastMCP
+
+# Dual-robot coordination guide. Pulled in as the FastMCP `instructions`
+# string so it's surfaced to every LLM session at handshake time. Edit the
+# guide in ``instructions.py`` -- do NOT inline the docstring here.
+try:
+    from .instructions import DUAL_ROBOT_INSTRUCTIONS          # package layout
+except ImportError:
+    try:
+        from instructions import DUAL_ROBOT_INSTRUCTIONS       # flat layout
+    except ImportError:
+        DUAL_ROBOT_INSTRUCTIONS = ""                           # fail-soft
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +186,7 @@ def _xyz(pose) -> dict:
 # FastMCP
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("robodk-v3")
+mcp = FastMCP("robodk-v3", instructions=DUAL_ROBOT_INSTRUCTIONS)
 
 
 # ===========================================================================
@@ -304,17 +325,24 @@ def get_pose(item_name: str, kind: str = "abs") -> dict:
 
 @mcp.tool()
 def get_robot_joints(robot_name: str) -> dict:
-    """Current robot joints in degrees."""
+    """Current robot joints in degrees.
+    FIX (bug 13): uses Mat.list() instead of Mat.tolist()[0]; the latter
+    returns a float on some robodk versions, raising
+    ``'float' object is not iterable``.
+    """
     r = _robot(robot_name)
     return {"robot": r.Name(),
-            "joints_deg": list(r.Joints().tolist()[0])}
+            "joints_deg": list(r.Joints().list())}
 
 
 @mcp.tool()
 def get_tcp_pose(robot_name: str) -> dict:
-    """Current TCP pose in world coords (follows attached objects)."""
+    """Current TCP pose in **world** coords (follows attached objects).
+    FIX (bug 12): prepends the robot's absolute base pose so the returned
+    matrix is in world, not the robot's own base frame.
+    """
     r = _robot(robot_name)
-    pose = r.SolveFK(r.Joints()) * r.PoseTool()
+    pose = r.PoseAbs() * r.SolveFK(r.Joints()) * r.PoseTool()
     return {"robot": r.Name(),
             "pose_matrix_row_major": _pose_flat(pose),
             "position_mm": _xyz(pose)}
@@ -322,9 +350,10 @@ def get_tcp_pose(robot_name: str) -> dict:
 
 @mcp.tool()
 def solve_fk(robot_name: str, joints: list) -> dict:
-    """Forward kinematics for the robot's active TCP."""
+    """Forward kinematics for the robot's active TCP, in world coords.
+    Returns the world TCP, i.e. base_in_world * FK(joints) * PoseTool."""
     r = _robot(robot_name)
-    pose = r.SolveFK(joints) * r.PoseTool()
+    pose = r.PoseAbs() * r.SolveFK(joints) * r.PoseTool()
     return {"robot": r.Name(), "joints_deg": joints,
             "pose_matrix_row_major": _pose_flat(pose),
             "position_mm": _xyz(pose)}
@@ -334,14 +363,17 @@ def solve_fk(robot_name: str, joints: list) -> dict:
 def solve_ik(robot_name: str, pose: Any,
              joints_seed: Optional[list] = None) -> dict:
     """Inverse kinematics, returns nearest single solution.
-    pose: 4x4 nested list or 16-element flat list.
+    pose: 4x4 nested list or 16-element flat list, **in world frame**.
     joints_seed: if given, seeds IK from this configuration (locks branch).
     """
     r = _robot(robot_name)
-    p = _mat(pose)
+    p_world = _mat(pose)
+    # Convert world target into robot's reference (base) frame so SolveIK
+    # gets a consistent target regardless of any active user frame.
+    p_local = r.PoseAbs().inv() * p_world
     if joints_seed is not None:
         r.setJoints(joints_seed)
-    sol = r.SolveIK(p)
+    sol = r.SolveIK(p_local)
     joints_out = list(sol.tolist()[0]) if sol.size() > 0 else []
     return {"robot": r.Name(), "joints_deg": joints_out}
 
@@ -350,8 +382,9 @@ def solve_ik(robot_name: str, pose: Any,
 def solve_ik_all(robot_name: str, pose: Any) -> dict:
     """All IK branches (FIX: returns proper N x 6 array)."""
     r = _robot(robot_name)
-    p = _mat(pose)
-    mat = r.SolveIK_All(p)
+    p_world = _mat(pose)
+    p_local = r.PoseAbs().inv() * p_world
+    mat = r.SolveIK_All(p_local)
     rows = mat.Rows() if hasattr(mat, "Rows") else mat
     sols = []
     for row in rows:
@@ -1188,7 +1221,7 @@ def set_joint_limits(robot_name: str, lower_deg: list,
 
 def main():
     global _ROBODK_HOST, _ROBODK_PORT
-    p = argparse.ArgumentParser(description="RoboDK MCP Server v3")
+    p = argparse.ArgumentParser(description="RoboDK MCP Server v3.1")
     p.add_argument("--host", default="localhost",
                    help="RoboDK API host (default: localhost)")
     p.add_argument("--port", default=20500, type=int,

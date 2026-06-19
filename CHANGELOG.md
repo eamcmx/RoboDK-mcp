@@ -1,5 +1,45 @@
 # Changelog
 
+## v3.1.0 (2026-05-23)
+
+Patch release on top of v3.0.0. Two correctness fixes, one prompt-engineering
+addition, and a bundled worked example. Tool surface is unchanged; all v3
+clients work without modification.
+
+### Added
+
+- **Server `instructions` field** now carries the *Dual-Robot Coordination*
+  guide (see `v3/instructions.py`). Every LLM session that loads this MCP
+  receives the four frame-handling rules, the master-slave sync pattern, the
+  reach precheck, dual-arm handover, dual-arm pick-and-place,
+  collision-aware coordinated motion, and the MATLAB-style Newton-Jacobian
+  IK fallback at handshake time.
+- **Worked example:** `v3/examples/example_dual_ur5_master_slave.py` plus
+  `v3/examples/stations/Dual UR5t.rdk`. Loads two UR5s, captures the
+  tool-to-tool offset from the current configuration, then keeps the slave
+  locked to the master in real time as the user jogs in RoboDK.
+
+### Fixed (2 v3 bugs)
+
+12. **`get_tcp_pose`** — now returns the TCP **in world coordinates** as the
+    docstring promises. v3 returned `SolveFK(Joints) * PoseTool`, i.e. the
+    TCP in the *robot's own base frame*. With multiple robots sharing a
+    station, two robots at identical joints reported identical TCPs even
+    when their bases were 1050 mm apart, breaking every cross-robot
+    relative-pose computation.
+13. **`get_robot_joints`** — no longer raises
+    `'float' object is not iterable`. The v3 implementation relied on
+    `Mat.tolist()[0]` which returns a float on some `robodk` Python
+    wrapper versions; now uses the documented flat-list method
+    `Mat.list()`.
+
+### Documentation
+
+- `v3/README.md` gains a *Dual-robot coordination* section linking to the
+  guide and the example.
+
+---
+
 ## v3.0.0 (2026-05-22)
 
 Complete rewrite of the MCP server. **~71 tools** (vs 41 in v2), every known
